@@ -20,7 +20,36 @@ const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'
 ).replace(/\/$/, '');
 
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/* ------------------------------------------------------------------ */
+/*  Token helpers (localStorage)                                       */
+/* ------------------------------------------------------------------ */
+
+const ACCESS_TOKEN_KEY = 'fd_access_token';
+const REFRESH_TOKEN_KEY = 'fd_refresh_token';
+
+export function getAccessToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+}
+
+export function clearTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Error class                                                        */
+/* ------------------------------------------------------------------ */
 
 export class ApiError extends Error {
   constructor(
@@ -33,11 +62,17 @@ export class ApiError extends Error {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Core fetch wrapper                                                 */
+/* ------------------------------------------------------------------ */
+
+let isRefreshing = false;
+let refreshPromise: Promise<LoginResponse | null> | null = null;
+
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit & { query?: object } = {},
+  options: RequestInit & { query?: object; _isRetry?: boolean } = {},
 ): Promise<T> {
-  const method = (options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers);
   const queryString = buildQueryString(options.query);
   const url = `${API_BASE_URL}${path}${queryString}`;
@@ -46,17 +81,17 @@ export async function apiFetch<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  if (!SAFE_METHODS.has(method)) {
-    const csrfToken = getCookieValue('fd_csrf_token');
+  // Inject bearer token if available
+  const accessToken = getAccessToken();
 
-    if (csrfToken) {
-      headers.set('x-csrf-token', csrfToken);
-    }
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
   const response = await fetch(url, {
     ...options,
-    credentials: 'include',
+    // Only send cookies when no bearer token (local dev / Swagger fallback)
+    credentials: accessToken ? 'omit' : 'include',
     headers,
     cache: 'no-store',
   });
@@ -71,33 +106,132 @@ export async function apiFetch<T>(
     : await response.text();
 
   if (!response.ok) {
+    // 401 auto-refresh-and-retry (only once, only if we have a refresh token)
+    if (
+      response.status === 401 &&
+      !options._isRetry &&
+      getRefreshToken() &&
+      !path.startsWith('/auth/')
+    ) {
+      const refreshed = await tryRefreshToken();
+
+      if (refreshed) {
+        return apiFetch<T>(path, { ...options, _isRetry: true });
+      }
+    }
+
     throw new ApiError(resolveErrorMessage(payload), response.status, payload);
   }
 
   return payload as T;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Auto-refresh helper (coalesces concurrent calls)                   */
+/* ------------------------------------------------------------------ */
+
+async function tryRefreshToken(): Promise<boolean> {
+  if (isRefreshing && refreshPromise) {
+    const result = await refreshPromise;
+    return result !== null;
+  }
+
+  isRefreshing = true;
+
+  refreshPromise = (async (): Promise<LoginResponse | null> => {
+    try {
+      const refreshToken = getRefreshToken();
+
+      if (!refreshToken) return null;
+
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+        credentials: 'omit',
+      });
+
+      if (!res.ok) {
+        clearTokens();
+        return null;
+      }
+
+      const data: LoginResponse = await res.json();
+
+      if (data.accessToken && data.refreshToken) {
+        setTokens(data.accessToken, data.refreshToken);
+        return data;
+      }
+
+      clearTokens();
+      return null;
+    } catch {
+      clearTokens();
+      return null;
+    } finally {
+      isRefreshing = false;
+      refreshPromise = null;
+    }
+  })();
+
+  const result = await refreshPromise;
+  return result !== null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Auth API                                                           */
+/* ------------------------------------------------------------------ */
+
 export const authApi = {
-  login(email: string, password: string) {
-    return apiFetch<LoginResponse>('/auth/login', {
+  async login(email: string, password: string): Promise<LoginResponse> {
+    const response = await apiFetch<LoginResponse>('/auth/login?responseMode=bearer', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
+
+    if (response.accessToken && response.refreshToken) {
+      setTokens(response.accessToken, response.refreshToken);
+    }
+
+    return response;
   },
+
   me() {
     return apiFetch<User>('/auth/me');
   },
-  refresh() {
-    return apiFetch<LoginResponse>('/auth/refresh', {
+
+  async refresh(): Promise<LoginResponse> {
+    const refreshToken = getRefreshToken();
+
+    const response = await apiFetch<LoginResponse>('/auth/refresh', {
       method: 'POST',
+      body: JSON.stringify({ refreshToken: refreshToken || undefined }),
     });
+
+    if (response.accessToken && response.refreshToken) {
+      setTokens(response.accessToken, response.refreshToken);
+    }
+
+    return response;
   },
-  logout() {
-    return apiFetch<{ success: boolean }>('/auth/logout', {
-      method: 'POST',
-    });
+
+  async logout(): Promise<{ success: boolean }> {
+    const refreshToken = getRefreshToken();
+
+    try {
+      return await apiFetch<{ success: boolean }>('/auth/logout', {
+        method: 'POST',
+        body: JSON.stringify({ refreshToken: refreshToken || undefined }),
+      });
+    } finally {
+      clearTokens();
+    }
   },
 };
+
+/* ------------------------------------------------------------------ */
+/*  Domain APIs (unchanged)                                            */
+/* ------------------------------------------------------------------ */
 
 export const dashboardApi = {
   getSummary(filters: DashboardFilters) {
@@ -176,6 +310,10 @@ export const usersApi = {
   },
 };
 
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
 function buildQueryString(query?: object) {
   if (!query) {
     return '';
@@ -195,22 +333,6 @@ function buildQueryString(query?: object) {
 
   const serialized = params.toString();
   return serialized ? `?${serialized}` : '';
-}
-
-function getCookieValue(name: string) {
-  if (typeof document === 'undefined') {
-    return undefined;
-  }
-
-  const cookie = document.cookie
-    .split('; ')
-    .find((entry) => entry.startsWith(`${name}=`));
-
-  if (!cookie) {
-    return undefined;
-  }
-
-  return decodeURIComponent(cookie.split('=').slice(1).join('='));
 }
 
 function resolveErrorMessage(payload: unknown) {

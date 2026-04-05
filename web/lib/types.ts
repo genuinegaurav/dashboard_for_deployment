@@ -15,6 +15,9 @@ export interface User {
 
 export interface LoginResponse {
   user: User;
+  accessToken?: string;
+  refreshToken?: string;
+  tokenType?: string;
 }
 
 export interface FinancialRecord {

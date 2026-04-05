@@ -38,7 +38,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly authSessionService: AuthSessionService,
     private readonly appConfigService: AppConfigService,
-  ) {}
+  ) { }
 
   @Post('login')
   @Throttle({
@@ -76,15 +76,10 @@ export class AuthController {
     const responseMode = loginQueryDto.responseMode ?? AuthResponseMode.COOKIE;
 
     if (responseMode === AuthResponseMode.BEARER) {
-      if (this.appConfigService.isProduction) {
-        throw new BadRequestException(
-          'Explicit bearer-token responses are disabled in production',
-        );
-      }
-
       return {
         user: loginResult.user,
         accessToken: loginResult.accessToken,
+        refreshToken: loginResult.refreshToken,
         tokenType: 'Bearer',
       };
     }
@@ -109,14 +104,27 @@ export class AuthController {
   async refresh(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
+    @Body() body: { refreshToken?: string },
   ) {
-    const refreshToken = request.cookies?.[this.appConfigService.refreshCookieName];
+    const refreshToken =
+      body?.refreshToken ||
+      request.cookies?.[this.appConfigService.refreshCookieName];
 
     if (!refreshToken) {
-      throw new BadRequestException('Refresh cookie is missing');
+      throw new BadRequestException('Refresh token is missing');
     }
 
     const session = await this.authSessionService.refreshSession(refreshToken);
+
+    if (body?.refreshToken) {
+      return {
+        user: session.user,
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        tokenType: 'Bearer',
+      };
+    }
+
     const csrfToken = createCsrfToken();
 
     setAuthCookies(
@@ -138,10 +146,13 @@ export class AuthController {
   async logout(
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
+    @Body() body: { refreshToken?: string },
   ) {
-    await this.authSessionService.revokeSession(
-      request.cookies?.[this.appConfigService.refreshCookieName],
-    );
+    const refreshToken =
+      body?.refreshToken ||
+      request.cookies?.[this.appConfigService.refreshCookieName];
+
+    await this.authSessionService.revokeSession(refreshToken);
     clearAuthCookies(response, this.appConfigService);
 
     return { success: true };

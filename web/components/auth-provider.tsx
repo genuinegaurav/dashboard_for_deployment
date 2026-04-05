@@ -7,7 +7,7 @@ import {
   useState,
 } from 'react';
 
-import { ApiError, authApi } from '@/lib/api';
+import { ApiError, authApi, clearTokens, getAccessToken } from '@/lib/api';
 import { User } from '@/lib/types';
 
 interface AuthContextValue {
@@ -30,28 +30,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function refreshSession() {
     try {
-      const currentUser = await authApi.me();
-      setUser(currentUser);
-      return currentUser;
+      // If we have a stored token, try /auth/me first
+      if (getAccessToken()) {
+        const currentUser = await authApi.me();
+        setUser(currentUser);
+        return currentUser;
+      }
+
+      // No token — try refreshing (will use stored refresh token if available)
+      const refreshedSession = await authApi.refresh();
+      setUser(refreshedSession.user);
+      return refreshedSession.user;
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
+        // Access token expired — try refresh
         try {
           const refreshedSession = await authApi.refresh();
-
           setUser(refreshedSession.user);
           return refreshedSession.user;
-        } catch (refreshError) {
-          if (refreshError instanceof ApiError && refreshError.status === 401) {
-            setUser(null);
-            return null;
-          }
-
+        } catch {
           setUser(null);
+          clearTokens();
           return null;
         }
       }
 
       setUser(null);
+      clearTokens();
       return null;
     } finally {
       setIsLoading(false);
@@ -60,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function login(email: string, password: string) {
     const response = await authApi.login(email, password);
-
     setUser(response.user);
     return response.user;
   }
@@ -70,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await authApi.logout();
     } finally {
       setUser(null);
+      clearTokens();
     }
   }
 
