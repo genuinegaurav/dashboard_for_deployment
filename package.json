@@ -4,7 +4,7 @@
   "private": true,
   "description": "Finance dashboard backend built with NestJS, Prisma, PostgreSQL, and JWT-based RBAC.",
   "engines": {
-    "node": ">=20.0.0"
+    "node": "20.x"
   },
   "scripts": {
     "postinstall": "prisma generate",
