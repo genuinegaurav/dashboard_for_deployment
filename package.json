@@ -1,0 +1,71 @@
+{
+  "name": "finance-dashboard-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Finance dashboard backend built with NestJS, Prisma, PostgreSQL, and JWT-based RBAC.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "postinstall": "prisma generate",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:prod": "node dist/main.js",
+    "start:dev": "ts-node --project tsconfig.json src/main.ts",
+    "frontend:dev": "npm --prefix web run dev",
+    "frontend:build": "npm --prefix web run build",
+    "frontend:start": "npm --prefix web run start",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:seed:dev": "node prisma/seed.js",
+    "admin:bootstrap": "node scripts/bootstrap-admin.js",
+    "db:reset:dev": "prisma migrate reset --force --skip-seed && npm run prisma:seed:dev",
+    "test": "jest --config ./jest.config.json --runInBand",
+    "test:watch": "jest --config ./jest.config.json --watch",
+    "test:e2e": "node scripts/ensure-env-file.js .env.test && cross-env NODE_ENV=test DOTENV_CONFIG_PATH=.env.test node -r dotenv/config ./node_modules/prisma/build/index.js migrate deploy && cross-env NODE_ENV=test DOTENV_CONFIG_PATH=.env.test node -r dotenv/config ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.16",
+    "@nestjs/config": "^4.0.2",
+    "@nestjs/core": "^11.1.16",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.1.16",
+    "@nestjs/swagger": "^11.2.6",
+    "@nestjs/throttler": "^6.4.0",
+    "@prisma/client": "^6.15.0",
+    "bcryptjs": "^3.0.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.2",
+    "helmet": "^8.1.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.1.16",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "latest",
+    "@types/jest": "^29.5.14",
+    "@types/node": "latest",
+    "@types/passport": "latest",
+    "@types/passport-jwt": "latest",
+    "@types/supertest": "latest",
+    "cross-env": "latest",
+    "jest": "^29.7.0",
+    "prisma": "^6.15.0",
+    "supertest": "latest",
+    "ts-jest": "^29.4.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

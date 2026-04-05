@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  VIEWER
+  ANALYST
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RecordType {
+  INCOME
+  EXPENSE
+}
+
+model User {
+  id                   String            @id @default(uuid())
+  email                String            @unique
+  name                 String
+  passwordHash         String
+  refreshTokenHash     String?
+  refreshTokenExpiresAt DateTime?
+  role                 UserRole          @default(VIEWER)
+  status               UserStatus        @default(ACTIVE)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  createdRecords       FinancialRecord[] @relation("RecordCreatedBy")
+  updatedRecords       FinancialRecord[] @relation("RecordUpdatedBy")
+
+  @@index([status, role])
+}
+
+model FinancialRecord {
+  id              String     @id @default(uuid())
+  amountInCents   Int
+  type            RecordType
+  category        String
+  recordDate      DateTime   @db.Date
+  notes           String?
+  createdByUserId String
+  updatedByUserId String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+  createdBy       User       @relation("RecordCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  updatedBy       User?      @relation("RecordUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([recordDate])
+  @@index([category])
+  @@index([type])
+  @@index([deletedAt])
+  @@index([createdByUserId])
+  @@index([deletedAt, recordDate])
+  @@index([deletedAt, type, recordDate])
+  @@index([deletedAt, category, recordDate])
+}
